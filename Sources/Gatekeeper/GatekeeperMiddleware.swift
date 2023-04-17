@@ -21,13 +21,24 @@ public struct GatekeeperMiddleware: Middleware {
     public func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
         let gatekeeper = request.gatekeeper(config: config, keyMaker: keyMaker)
             
-        let gatekeep: EventLoopFuture<Void>
+        let gatekeep: EventLoopFuture<Gatekeeper.Entry>
         if let error = error {
             gatekeep = gatekeeper.gatekeep(on: request, throwing: error)
         } else {
             gatekeep = gatekeeper.gatekeep(on: request)
         }
         
-        return gatekeep.flatMap { next.respond(to: request) }
+        return gatekeep.flatMap { entry in
+            next.respond(to: request).map { response in
+                guard let config = self.config else { return response }
+
+                response.headers.replaceOrAdd(name: "Rate-Limit-Limit", value: "\(config.limit)")
+                response.headers.replaceOrAdd(name: "Rate-Limit-Remaining", value: "\(entry.requestsLeft)")
+
+                let refreshes = entry.createdAt.addingTimeInterval(config.refreshInterval).timeIntervalSince1970
+                response.headers.replaceOrAdd(name: "Rate-Limit-Reset", value: "\(Int(refreshes))")
+                return response
+            }
+        }
     }
 }

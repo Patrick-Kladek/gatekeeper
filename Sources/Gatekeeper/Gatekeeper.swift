@@ -14,24 +14,26 @@ public struct Gatekeeper {
     public func gatekeep(
         on req: Request,
         throwing error: Error = Abort(.tooManyRequests, reason: "Slow down. You sent too many requests.")
-    ) -> EventLoopFuture<Void> {
-        keyMaker
-            .make(for: req)
-            .flatMap { cacheKey in
-                fetchOrCreateEntry(for: cacheKey, on: req)
-                    .guard(
-                        { $0.requestsLeft > 0 },
-                        else: error
-                    )
-                    .map(updateEntry)
-                    .flatMap { entry in
-                        // The amount of time the entry has existed.
-                        let entryLifetime = Int(Date().timeIntervalSince1970 - entry.createdAt.timeIntervalSince1970)
-                        // Remaining time until the entry expires. The entry would be expired by cache if it was negative.
-                        let timeRemaining = Int(config.refreshInterval) - entryLifetime
-                        return cache.set(cacheKey, to: entry, expiresIn: .seconds(timeRemaining))
-                    }
-            }
+    ) -> EventLoopFuture<Entry> {
+        let make = keyMaker .make(for: req)
+
+        var key: String = ""
+        var entry = make.flatMap { cacheKey -> EventLoopFuture<Entry> in
+            key = cacheKey
+            return fetchOrCreateEntry(for: cacheKey, on: req)
+        }
+        entry = entry.guard({ $0.requestsLeft > 0 }, else: error)
+
+        entry = entry.map(updateEntry)
+
+        _ = entry.flatMap { entry in
+            // The amount of time the entry has existed.
+            let entryLifetime = Int(Date().timeIntervalSince1970 - entry.createdAt.timeIntervalSince1970)
+            // Remaining time until the entry expires. The entry would be expired by cache if it was negative.
+            let timeRemaining = Int(config.refreshInterval) - entryLifetime
+            return cache.set(key, to: entry, expiresIn: .seconds(timeRemaining))
+        }
+        return entry
     }
     
     private func updateEntry(_ entry: Entry) -> Entry {
