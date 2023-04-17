@@ -35,8 +35,9 @@ public struct GatekeeperMiddleware: Middleware {
                 response.headers.replaceOrAdd(name: "Rate-Limit-Limit", value: "\(config.limit)")
                 response.headers.replaceOrAdd(name: "Rate-Limit-Remaining", value: "\(entry.requestsLeft)")
 
-                let refreshes = entry.createdAt.addingTimeInterval(config.refreshInterval).timeIntervalSince1970
-                response.headers.replaceOrAdd(name: "Rate-Limit-Reset", value: "\(Int(refreshes))")
+                let expiresAt = entry.createdAt.addingTimeInterval(config.refreshInterval)
+                let reset = Int(expiresAt.timeIntervalSince1970 - Date().timeIntervalSince1970)
+                response.headers.replaceOrAdd(name: "Rate-Limit-Reset", value: "\(reset)")
                 return response
             }
         }
